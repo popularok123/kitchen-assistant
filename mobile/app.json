@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "厨房协作助手",
+    "slug": "kitchen-assistant",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1b6ec2"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.kitchen.assistant",
+      "infoPlist": {
+        "NSCameraUsageDescription": "直播间需要使用摄像头进行视频直播",
+        "NSMicrophoneUsageDescription": "直播间需要使用麦克风进行语音交流"
+      }
+    },
+    "android": {
+      "package": "com.kitchen.assistant",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1b6ec2"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "react-native-webrtc",
+        {
+          "cameraPermission": "直播间需要使用摄像头",
+          "microphonePermission": "直播间需要使用麦克风"
+        }
+      ]
+    ],
+    "scheme": "kitchen-assistant",
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
