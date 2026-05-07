@@ -1,0 +1,445 @@
+@page "/chat"
+@inject AppState AppState
+@inject ChatService ChatService
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>厨房聊天室</PageTitle>
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>💬 厨房聊天室</h2>
+        @if (ChatService.IsConnected)
+        {
+            <span class="badge bg-success fs-6"><span class="me-1">●</span> 已连接</span>
+        }
+    </div>
+
+    @if (!AppState.IsLoggedIn)
+    {
+        <div class="text-center mt-5">
+            <div class="display-1 text-muted mb-3">🔒</div>
+            <p class="text-muted lead">请先在首页输入昵称加入聊天室</p>
+            <button class="btn btn-primary" @onclick="GoHome">返回首页</button>
+        </div>
+    }
+    else if (!ChatService.IsConnected)
+    {
+        <div class="text-center mt-5">
+            <div class="spinner-border text-primary mb-3" role="status"></div>
+            <p class="text-muted">正在连接聊天服务器...</p>
+        </div>
+    }
+    else
+    {
+        <div class="row g-4">
+            <!-- 消息面板 -->
+            <div class="col-md-8">
+                <div class="card shadow d-flex flex-column" style="height: 580px;">
+                    <div class="card-header bg-white border-bottom py-3">
+                        <h6 class="mb-0">消息</h6>
+                    </div>
+
+                    <div class="card-body overflow-auto flex-grow-1 p-3" @ref="_messagesContainer">
+                        @if (ChatService.Messages.Count == 0)
+                        {
+                            <div class="text-center text-muted py-5">
+                                <div class="display-4 mb-3">💬</div>
+                                <p>还没有消息，发送第一条吧！</p>
+                            </div>
+                        }
+                        @foreach (var msg in ChatService.Messages)
+                        {
+                            @if (msg.Type == MessageType.System)
+                            {
+                                <div class="text-center my-3">
+                                    <span class="badge bg-light text-muted border">@msg.Content</span>
+                                </div>
+                            }
+                            else if (msg.Type == MessageType.Private)
+                            {
+                                var isOwn = msg.UserName == AppState.UserName;
+                                <div class="d-flex @(isOwn ? "justify-content-end" : "justify-content-start") mb-3">
+                                    @if (!isOwn)
+                                    {
+                                        <div class="me-2 text-center flex-shrink-0">
+                                            <div class="rounded-circle bg-light border d-flex align-items-center justify-content-center" style="width:36px;height:36px;font-size:1.1rem;">👤</div>
+                                            <small class="text-muted d-block" style="font-size:0.65rem;">@msg.UserName</small>
+                                        </div>
+                                    }
+                                    <div style="max-width:65%;">
+                                        <div class="small text-muted mb-1 @(isOwn ? "text-end" : "")">
+                                            🔒
+                                            @if (isOwn)
+                                            {
+                                                <span>私信给 <strong>@msg.TargetUserName</strong></span>
+                                            }
+                                            else
+                                            {
+                                                <span><strong>@msg.UserName</strong> 私信给你</span>
+                                            }
+                                        </div>
+                                        <div class="rounded-3 px-3 py-2 private-bubble @(isOwn ? "private-own" : "private-other")">
+                                            @msg.Content
+                                        </div>
+                                        <div class="@(isOwn ? "text-end" : "") mt-1">
+                                            <small class="text-muted" style="font-size:0.7rem;">@msg.Timestamp.ToString("HH:mm")</small>
+                                        </div>
+                                    </div>
+                                    @if (isOwn)
+                                    {
+                                        <div class="ms-2 text-center flex-shrink-0">
+                                            <div class="rounded-circle bg-primary d-flex align-items-center justify-content-center" style="width:36px;height:36px;font-size:1.1rem;">@AppState.Avatar</div>
+                                            <small class="text-muted d-block" style="font-size:0.65rem;">我</small>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                var isOwn = msg.UserName == AppState.UserName;
+                                var canRecall = isOwn && (DateTime.Now - msg.Timestamp).TotalMinutes <= 2;
+                                <div class="d-flex @(isOwn ? "justify-content-end" : "justify-content-start") mb-3 msg-group">
+                                    @if (!isOwn)
+                                    {
+                                        <div class="me-2 text-center flex-shrink-0">
+                                            <div class="rounded-circle bg-light border d-flex align-items-center justify-content-center" style="width:36px;height:36px;font-size:1.1rem;">👤</div>
+                                            <small class="text-muted d-block" style="font-size:0.65rem;">@msg.UserName</small>
+                                        </div>
+                                    }
+                                    <div style="max-width:65%;">
+                                        <div class="@(isOwn ? "bg-primary text-white" : "bg-light border") rounded-3 px-3 py-2">
+                                            @msg.Content
+                                        </div>
+                                        <div class="@(isOwn ? "text-end" : "") mt-1 d-flex align-items-center @(isOwn ? "justify-content-end" : "") gap-2">
+                                            <small class="text-muted" style="font-size:0.7rem;">@msg.Timestamp.ToString("HH:mm")</small>
+                                            @if (canRecall)
+                                            {
+                                                <button class="btn btn-link btn-sm p-0 text-muted recall-btn"
+                                                        style="font-size:0.7rem;"
+                                                        @onclick="() => RecallMessage(msg.Id)">撤回</button>
+                                            }
+                                        </div>
+                                    </div>
+                                    @if (isOwn)
+                                    {
+                                        <div class="ms-2 text-center flex-shrink-0">
+                                            <div class="rounded-circle bg-primary d-flex align-items-center justify-content-center" style="width:36px;height:36px;font-size:1.1rem;">@AppState.Avatar</div>
+                                            <small class="text-muted d-block" style="font-size:0.65rem;">我</small>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+
+                    <div class="card-footer bg-white border-top p-3">
+                        <!-- 快捷回复 -->
+                        <div class="d-flex flex-wrap gap-1 mb-2">
+                            @foreach (var reply in QuickReplies)
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => SendQuickReply(reply)">
+                                    @reply
+                                </button>
+                            }
+                        </div>
+
+                        <!-- 输入区（含下拉提示） -->
+                        <div class="position-relative">
+                            @if (_showMentionDropdown && _mentionSuggestions.Count > 0)
+                            {
+                                <div class="mention-dropdown">
+                                    @foreach (var user in _mentionSuggestions)
+                                    {
+                                        <button class="mention-item" @onclick="() => SelectMention(user.Name)"
+                                                @onclick:stopPropagation="true">
+                                            <span class="me-2">👤</span>@user.Name
+                                        </button>
+                                    }
+                                </div>
+                            }
+                            <div class="input-group">
+                                <input value="@_messageInput" @oninput="HandleInput"
+                                       type="text" class="form-control"
+                                       placeholder="输入消息；输入 @@ 选择成员发私信..."
+                                       @onkeydown="HandleKeyDown"
+                                       @onblur="DelayHideDropdown"
+                                       disabled="@_isSending" />
+                                <button class="btn @(_isPrivateMode ? "btn-warning" : "btn-primary")"
+                                        @onclick="SendMessage"
+                                        disabled="@(string.IsNullOrWhiteSpace(_messageInput) || _isSending)">
+                                    @if (_isSending)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                                    }
+                                    @(_isPrivateMode ? "🔒 私信" : "发送")
+                                </button>
+                            </div>
+                            @if (_isPrivateMode)
+                            {
+                                <div class="mt-1">
+                                    <small class="text-warning fw-semibold">
+                                        🔒 私信模式：发送给 <strong>@_privateTarget</strong>
+                                    </small>
+                                    <button class="btn btn-sm btn-link text-muted p-0 ms-2" @onclick="CancelPrivateMode">
+                                        取消
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 在线成员面板 -->
+            <div class="col-md-4">
+                <div class="card shadow">
+                    <div class="card-header bg-white">
+                        <h6 class="mb-0">👥 在线成员 (@ChatService.OnlineUsers.Count)</h6>
+                    </div>
+                    <div class="card-body p-0">
+                        @if (ChatService.OnlineUsers.Count == 0)
+                        {
+                            <p class="text-muted text-center py-3 small">暂无在线成员</p>
+                        }
+                        else
+                        {
+                            <div class="list-group list-group-flush">
+                                @foreach (var user in ChatService.OnlineUsers)
+                                {
+                                    <div class="list-group-item d-flex align-items-center gap-2">
+                                        <div class="bg-success rounded-circle flex-shrink-0" style="width:8px;height:8px;"></div>
+                                        <span class="@(user.Name == AppState.UserName ? "fw-semibold" : "") flex-grow-1">
+                                            @user.Name
+                                        </span>
+                                        @if (user.Name == AppState.UserName)
+                                        {
+                                            <span class="badge bg-primary rounded-pill">我</span>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary py-0 px-2"
+                                                    style="font-size:0.75rem;"
+                                                    @onclick="() => StartPrivateTo(user.Name)">
+                                                私信
+                                            </button>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="card shadow mt-3">
+                    <div class="card-body text-muted small py-3">
+                        <p class="mb-1 fw-semibold">💡 使用说明</p>
+                        <p class="mb-1">输入 <code>@@用户名</code> 触发私信</p>
+                        <p class="mb-0">或点击成员旁的「私信」按钮</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .mention-dropdown {
+        position: absolute;
+        bottom: calc(100% + 4px);
+        left: 0;
+        right: 0;
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
+        z-index: 1050;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+    .mention-item {
+        display: block;
+        width: 100%;
+        padding: 8px 16px;
+        border: none;
+        background: transparent;
+        text-align: left;
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+    .mention-item:hover { background: #f8f9fa; }
+    .private-bubble { border: 1.5px solid; }
+    .recall-btn { opacity: 0; transition: opacity 0.15s; }
+    .msg-group:hover .recall-btn { opacity: 1; }
+    .private-own {
+        background: #fff3cd;
+        border-color: #ffc107;
+        color: #664d03;
+    }
+    .private-other {
+        background: #f0e6ff;
+        border-color: #9c6fde;
+        color: #3d1a78;
+    }
+</style>
+
+@code {
+    private static readonly string[] QuickReplies = ["👍 好的", "🔥 加油", "😋 好香", "🙏 帮忙", "✅ 完成", "⏰ 等一下"];
+
+    private string _messageInput = string.Empty;
+    private bool _isSending;
+    private ElementReference _messagesContainer;
+
+    // @ 下拉状态
+    private bool _showMentionDropdown;
+    private List<User> _mentionSuggestions = [];
+    private string _mentionFilter = string.Empty;
+
+    // 私信状态
+    private bool _isPrivateMode;
+    private string _privateTarget = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ChatService.OnUpdate += OnChatUpdate;
+        if (AppState.IsLoggedIn && !ChatService.IsConnected)
+        {
+            try { await ChatService.ConnectAsync(AppState.UserName); StateHasChanged(); }
+            catch { }
+        }
+    }
+
+    private void OnChatUpdate()
+    {
+        InvokeAsync(async () =>
+        {
+            StateHasChanged();
+            await ScrollToBottomAsync();
+        });
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await ScrollToBottomAsync();
+    }
+
+    private async Task ScrollToBottomAsync()
+    {
+        try { await JS.InvokeVoidAsync("scrollToBottom", _messagesContainer); } catch { }
+    }
+
+    // 实时监听输入，检测 @ 符号
+    private void HandleInput(ChangeEventArgs e)
+    {
+        _messageInput = e.Value?.ToString() ?? string.Empty;
+
+        var atIndex = _messageInput.LastIndexOf('@');
+        if (atIndex >= 0)
+        {
+            var afterAt = _messageInput[(atIndex + 1)..];
+            if (!afterAt.Contains(' '))
+            {
+                _mentionFilter = afterAt;
+                _mentionSuggestions = ChatService.OnlineUsers
+                    .Where(u => u.Name != AppState.UserName &&
+                                (string.IsNullOrEmpty(_mentionFilter) ||
+                                 u.Name.Contains(_mentionFilter, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+                _showMentionDropdown = _mentionSuggestions.Count > 0;
+                return;
+            }
+        }
+
+        _showMentionDropdown = false;
+        _mentionSuggestions = [];
+    }
+
+    // 从下拉选中用户
+    private void SelectMention(string userName)
+    {
+        var atIndex = _messageInput.LastIndexOf('@');
+        // 替换掉 @ 后的不完整内容，进入私信模式
+        _messageInput = atIndex >= 0 ? _messageInput[..atIndex] : string.Empty;
+        _showMentionDropdown = false;
+        StartPrivateTo(userName);
+    }
+
+    // 进入私信模式
+    private void StartPrivateTo(string userName)
+    {
+        _privateTarget = userName;
+        _isPrivateMode = true;
+        _messageInput = string.Empty;
+        _showMentionDropdown = false;
+    }
+
+    private void CancelPrivateMode()
+    {
+        _isPrivateMode = false;
+        _privateTarget = string.Empty;
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SendMessage();
+        if (e.Key == "Escape") { _showMentionDropdown = false; CancelPrivateMode(); }
+    }
+
+    private async Task DelayHideDropdown()
+    {
+        await Task.Delay(150);
+        _showMentionDropdown = false;
+        StateHasChanged();
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(_messageInput) || !ChatService.IsConnected || _isSending) return;
+
+        var content = _messageInput.Trim();
+        _messageInput = string.Empty;
+        _showMentionDropdown = false;
+        _isSending = true;
+        StateHasChanged();
+
+        try
+        {
+            if (_isPrivateMode && !string.IsNullOrWhiteSpace(_privateTarget))
+            {
+                await ChatService.SendPrivateMessageAsync(_privateTarget, content);
+            }
+            else
+            {
+                await ChatService.SendMessageAsync(content);
+            }
+        }
+        finally
+        {
+            _isSending = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SendQuickReply(string text)
+    {
+        if (!ChatService.IsConnected || _isSending) return;
+        _isSending = true;
+        StateHasChanged();
+        try { await ChatService.SendMessageAsync(text); }
+        finally { _isSending = false; StateHasChanged(); }
+    }
+
+    private async Task RecallMessage(Guid msgId)
+    {
+        await ChatService.RecallMessageAsync(msgId);
+    }
+
+    private void GoHome() => Navigation.NavigateTo("/");
+
+    public async ValueTask DisposeAsync()
+    {
+        ChatService.OnUpdate -= OnChatUpdate;
+        await Task.CompletedTask;
+    }
+}

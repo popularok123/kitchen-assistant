@@ -1,0 +1,388 @@
+@page "/recipe/{id:guid}"
+@inject RecipeService RecipeService
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject LocalStorageService Storage
+@implements IDisposable
+
+<div class="container mt-4">
+    @if (_recipe == null)
+    {
+        <div class="text-center mt-5">
+            <p class="text-muted">菜谱不存在</p>
+            <button class="btn btn-link" @onclick="GoToList">返回列表</button>
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            <div class="col-lg-8 mx-auto">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><button class="btn btn-link p-0 border-0" @onclick="GoToList">菜谱列表</button></li>
+                        <li class="breadcrumb-item active" aria-current="page">@_recipe.Name</li>
+                    </ol>
+                </nav>
+
+                <div class="card shadow mb-4">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <h1 class="card-title">@_recipe.Name</h1>
+                                <p class="lead text-muted">@_recipe.Description</p>
+                            </div>
+                            <button class="btn btn-lg @(RecipeService.IsFavorite(_recipe.Id) ? "btn-warning" : "btn-outline-secondary")" @onclick="() => RecipeService.ToggleFavorite(_recipe.Id)">
+                                @(RecipeService.IsFavorite(_recipe.Id) ? "⭐" : "☆")
+                            </button>
+                        </div>
+                        <div class="d-flex gap-4 mb-3">
+                            <span class="badge bg-info fs-6">⏱️ @_recipe.CookTimeMinutes 分钟</span>
+                            <span class="badge bg-primary fs-6">@GetDifficultyStars(_recipe.DifficultyLevel)</span>
+                            <span class="badge bg-success fs-6">🥬 @_recipe.Ingredients.Count 种食材</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card shadow mb-4">
+                    <div class="card-header bg-white">
+                        <h3 class="mb-0">🥬 食材清单</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            @foreach (var ingredient in _recipe.Ingredients)
+                            {
+                                <div class="col-md-6 mb-2">
+                                    <div class="d-flex align-items-center">
+                                        <input type="checkbox" class="form-check-input me-2">
+                                        <span>@ingredient</span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                @if (_savedStepIndex > 0 && !_isCookingMode)
+                {
+                    <div class="alert alert-info d-flex align-items-center justify-content-between mb-3 rounded-3">
+                        <span>⏸️ 上次烹饪到第 <strong>@(_savedStepIndex + 1)</strong> 步，是否继续？</span>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-primary" @onclick="() => ResumeCooking()">继续</button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => ClearSavedProgress()">重新开始</button>
+                        </div>
+                    </div>
+                }
+
+                <div class="card shadow mb-4">
+                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                        <h3 class="mb-0">👨‍🍳 烹饪步骤</h3>
+                        @if (!_isCookingMode)
+                        {
+                            <button class="btn btn-primary" @onclick="() => StartCooking()">
+                                开始烹饪
+                            </button>
+                        }
+                    </div>
+                    <div class="card-body">
+                        @for (int i = 0; i < _recipe.Steps.Count; i++)
+                        {
+                            var step = _recipe.Steps[i];
+                            var isCurrentStep = _isCookingMode && i == _currentStepIndex;
+                            var isCompleted = _isCookingMode && i < _currentStepIndex;
+
+                            <div class="mb-4 @(isCurrentStep ? "current-step" : "") @(isCompleted ? "completed-step" : "")">
+                                <div class="d-flex gap-3">
+                                    <div class="step-number @(isCurrentStep ? "current" : "") @(isCompleted ? "done" : "")">
+                                        @(isCompleted ? "✓" : $"{i + 1}")
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        <p class="mb-1 @(isCurrentStep ? "fw-bold" : "")">@step.Instruction</p>
+                                        @if (step.DurationSeconds > 0)
+                                        {
+                                            if (isCurrentStep && _timerSeconds > 0)
+                                            {
+                                                <div class="d-flex align-items-center gap-2 mt-2">
+                                                    <span class="badge @(_timerRunning ? "bg-danger" : "bg-secondary")" style="font-size: 1.1rem;">
+                                                        ⏱️ @FormatTime(_timerSeconds)
+                                                    </span>
+                                                    @if (!_timerRunning)
+                                                    {
+                                                        <button class="btn btn-sm btn-success" @onclick="StartTimer">
+                                                            开始计时
+                                                        </button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button class="btn btn-sm btn-warning" @onclick="PauseTimer">
+                                                            暂停
+                                                        </button>
+                                                        <button class="btn btn-sm btn-outline-secondary" @onclick="ResetTimer">
+                                                            重置
+                                                        </button>
+                                                    }
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <small class="text-muted">⏱️ @(step.DurationSeconds) 秒</small>
+                                            }
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    @if (_isCookingMode)
+                    {
+                        <div class="card-footer bg-white border-top">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <button class="btn btn-outline-secondary" @onclick="() => PrevStep()" disabled="@(_currentStepIndex == 0)">
+                                    上一步
+                                </button>
+                                <span class="fw-bold">步骤 @(_currentStepIndex + 1) / @_recipe.Steps.Count</span>
+                                @if (_currentStepIndex < _recipe.Steps.Count - 1)
+                                {
+                                    <button class="btn btn-primary" @onclick="() => NextStep()">
+                                        下一步
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-success" @onclick="() => FinishCooking()">
+                                        🎉 完成！
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                @if (_recipe.Tips.Any())
+                {
+                    <div class="card shadow border-info">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="mb-0">💡 小贴士</h5>
+                        </div>
+                        <div class="card-body">
+                            <ul class="mb-0">
+                                @foreach (var tip in _recipe.Tips)
+                                {
+                                    <li class="mb-2">@tip</li>
+                                }
+                            </ul>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .step-number {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background-color: #e9ecef;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        flex-shrink: 0;
+    }
+    .step-number.current {
+        background-color: #0d6efd;
+        color: white;
+    }
+    .step-number.done {
+        background-color: #198754;
+        color: white;
+    }
+    .current-step {
+        background-color: #e3f2fd;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 0 -1rem;
+    }
+    .completed-step {
+        opacity: 0.6;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private Recipe? _recipe;
+    private bool _isCookingMode;
+    private int _currentStepIndex;
+    private int _timerSeconds;
+    private bool _timerRunning;
+    private CancellationTokenSource? _timerCts;
+    private int _savedStepIndex = -1;
+
+    private string SaveKeyPrefix => $"cooking_{Id}";
+
+    protected override void OnInitialized()
+    {
+        RecipeService.OnFavoritesChanged += StateHasChanged;
+    }
+
+    protected override void OnParametersSet()
+    {
+        _recipe = RecipeService.GetRecipeById(Id);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await LoadSavedProgressAsync();
+    }
+
+    private async Task LoadSavedProgressAsync()
+    {
+        var saved = await Storage.GetItemAsync(SaveKeyPrefix);
+        if (saved != null && int.TryParse(saved, out var step) && step > 0)
+        {
+            _savedStepIndex = step;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveProgressAsync()
+    {
+        await Storage.SetItemAsync(SaveKeyPrefix, _currentStepIndex.ToString());
+    }
+
+    private async Task ClearSavedProgress()
+    {
+        _savedStepIndex = -1;
+        await Storage.RemoveItemAsync(SaveKeyPrefix);
+        StateHasChanged();
+    }
+
+    private async Task ResumeCooking()
+    {
+        _isCookingMode = true;
+        _currentStepIndex = _savedStepIndex;
+        _savedStepIndex = -1;
+        ResetTimerForCurrentStep();
+        await JS.InvokeVoidAsync("requestWakeLock");
+    }
+
+    private void GoToList()
+    {
+        Navigation.NavigateTo("/recipes");
+    }
+
+    private string GetDifficultyStars(int level)
+    {
+        return new string('⭐', level);
+    }
+
+    private async Task StartCooking()
+    {
+        _isCookingMode = true;
+        _currentStepIndex = 0;
+        ResetTimerForCurrentStep();
+        await JS.InvokeVoidAsync("requestWakeLock");
+    }
+
+    private async Task NextStep()
+    {
+        if (_recipe != null && _currentStepIndex < _recipe.Steps.Count - 1)
+        {
+            StopTimer();
+            _currentStepIndex++;
+            ResetTimerForCurrentStep();
+            await SaveProgressAsync();
+        }
+    }
+
+    private async Task PrevStep()
+    {
+        if (_currentStepIndex > 0)
+        {
+            StopTimer();
+            _currentStepIndex--;
+            ResetTimerForCurrentStep();
+            await SaveProgressAsync();
+        }
+    }
+
+    private async Task FinishCooking()
+    {
+        StopTimer();
+        _isCookingMode = false;
+        _currentStepIndex = 0;
+        await Storage.RemoveItemAsync(SaveKeyPrefix);
+        await JS.InvokeVoidAsync("releaseWakeLock");
+    }
+
+    private void ResetTimerForCurrentStep()
+    {
+        _timerRunning = false;
+        _timerSeconds = _recipe?.Steps.ElementAtOrDefault(_currentStepIndex)?.DurationSeconds ?? 0;
+    }
+
+    private void StartTimer()
+    {
+        if (_timerSeconds <= 0) return;
+
+        _timerRunning = true;
+        _timerCts = new CancellationTokenSource();
+        _ = RunTimerAsync(_timerCts.Token);
+    }
+
+    private async Task RunTimerAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        while (!cancellationToken.IsCancellationRequested && await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            if (_timerSeconds > 0)
+            {
+                _timerSeconds--;
+                await InvokeAsync(StateHasChanged);
+            }
+            else
+            {
+                StopTimer();
+                await InvokeAsync(StateHasChanged);
+                break;
+            }
+        }
+    }
+
+    private void PauseTimer() => StopTimer();
+
+    private void ResetTimer()
+    {
+        StopTimer();
+        ResetTimerForCurrentStep();
+        StateHasChanged();
+    }
+
+    private void StopTimer()
+    {
+        _timerRunning = false;
+        _timerCts?.Cancel();
+        _timerCts?.Dispose();
+        _timerCts = null;
+    }
+
+    private string FormatTime(int seconds)
+    {
+        var mins = seconds / 60;
+        var secs = seconds % 60;
+        return $"{mins:00}:{secs:00}";
+    }
+
+    public void Dispose()
+    {
+        StopTimer();
+        RecipeService.OnFavoritesChanged -= StateHasChanged;
+        if (_isCookingMode)
+            _ = JS.InvokeVoidAsync("releaseWakeLock");
+    }
+}

@@ -1,0 +1,39 @@
+# .NET 构建输出
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# 证书文件（不提交私钥）
+certs/server.key
+certs/server.pfx
+certs/rootCA.key
+certs/rootCA.srl
+certs/server.csr
+certs/san.ext
+
+# 数据库文件
+*.db
+*.db-shm
+*.db-wal
+
+# 用户本地配置
+appsettings.Development.json
+src/KitchenAssistant.Web/wwwroot/appsettings.json
+
+# IDE
+.idea/
+.vscode/
+*.DS_Store
+
+# NuGet
+*.nupkg
+.nuget/
+
+# 日志
+*.log
+logs/
+
+# Node (如后续添加前端)
+node_modules/

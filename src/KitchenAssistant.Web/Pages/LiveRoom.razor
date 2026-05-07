@@ -1,0 +1,633 @@
+@page "/live"
+@inject AppState AppState
+@inject LiveRoomService LiveService
+@inject RecipeService RecipeService
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>厨房直播间</PageTitle>
+
+<div class="container-fluid mt-3 px-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="mb-0">📡 厨房直播间</h2>
+        @if (LiveService.IsConnected)
+        {
+            <span class="badge bg-success"><span class="me-1">●</span> 已连接</span>
+        }
+    </div>
+
+    @if (!AppState.IsLoggedIn)
+    {
+        <div class="text-center mt-5">
+            <div class="display-1 text-muted mb-3">🔒</div>
+            <p class="text-muted lead">请先在首页输入昵称</p>
+            <button class="btn btn-primary" @onclick='() => Navigation.NavigateTo("/")'>返回首页</button>
+        </div>
+    }
+    else if (!LiveService.IsConnected)
+    {
+        <div class="text-center mt-5">
+            <div class="spinner-border text-primary mb-3" role="status"></div>
+            <p class="text-muted">正在连接...</p>
+        </div>
+    }
+    else if (LiveService.CurrentRoom == null)
+    {
+        <!-- ── 直播大厅 ── -->
+        <div class="row g-4">
+            <div class="col-lg-8">
+                <div class="card shadow">
+                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">🔴 正在直播</h5>
+                        <button class="btn btn-danger" @onclick="ShowCreateModal">
+                            📡 开始直播
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        @if (!LiveService.LiveRooms.Any(r => r.IsLive))
+                        {
+                            <div class="text-center py-5 text-muted">
+                                <div class="display-4 mb-3">📡</div>
+                                <p class="lead">暂无直播</p>
+                                <p class="small">成为第一个主播，带大家一起做饭！</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="list-group list-group-flush">
+                                @foreach (var room in LiveService.LiveRooms.Where(r => r.IsLive))
+                                {
+                                    <div class="list-group-item d-flex align-items-center gap-3 py-3">
+                                        <div class="flex-grow-1">
+                                            <div class="d-flex align-items-center gap-2 mb-1">
+                                                <span class="badge bg-danger">● LIVE</span>
+                                                <strong>@room.Name</strong>
+                                            </div>
+                                            <small class="text-muted">
+                                                🍳 @room.RecipeName &nbsp;·&nbsp;
+                                                👥 @(room.Viewers.Count) 人观看 &nbsp;·&nbsp;
+                                                步骤 @(room.CurrentStepIndex + 1)
+                                            </small>
+                                        </div>
+                                        @if (room.HostUserName == AppState.UserName)
+                                        {
+                                            <button class="btn btn-sm btn-outline-danger"
+                                                    @onclick="() => ReJoinRoom(room.Id)">返回直播</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-primary"
+                                                    @onclick="() => JoinRoom(room.Id)">进入观看</button>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4">
+                <div class="card shadow">
+                    <div class="card-body">
+                        <h6 class="fw-semibold mb-3">💡 功能说明</h6>
+                        <ul class="list-unstyled text-muted small mb-0">
+                            <li class="mb-2">📹 <strong>主播</strong>：实时摄像头画面推送给观众</li>
+                            <li class="mb-2">👀 <strong>观众</strong>：看到主播摄像头 + 步骤同步</li>
+                            <li class="mb-2">💬 <strong>弹幕</strong>：实时互动评论</li>
+                            <li>❓ <strong>提问</strong>：遇到问题直接向主播提问</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        var room = LiveService.CurrentRoom!;
+        var isHost = room.HostUserName == AppState.UserName;
+        var recipe = RecipeService.GetRecipeById(room.RecipeId);
+        var steps = recipe?.Steps ?? [];
+
+        <!-- ── 直播间内部 ── -->
+        <div class="row g-3">
+            <!-- 左：视频 + 步骤 -->
+            <div class="col-lg-7">
+                <!-- 房间头部 -->
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span class="badge bg-danger">● LIVE</span>
+                    <span class="fw-semibold">@room.Name</span>
+                    <span class="badge bg-light text-dark border small">👥 @room.Viewers.Count 人</span>
+                    <div class="ms-auto d-flex gap-2">
+                        @if (isHost)
+                        {
+                            <button class="btn btn-sm @(_micOn ? "btn-outline-secondary" : "btn-danger")"
+                                    @onclick="ToggleMic" title="@(_micOn ? "静音" : "取消静音")">
+                                @(_micOn ? "🎙️" : "🔇")
+                            </button>
+                            <button class="btn btn-sm @(_camOn ? "btn-outline-secondary" : "btn-warning")"
+                                    @onclick="ToggleCam" title="@(_camOn ? "关闭摄像头" : "打开摄像头")">
+                                @(_camOn ? "📹" : "🚫")
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="EndRoom">结束直播</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="LeaveRoom">离开</button>
+                        }
+                    </div>
+                </div>
+
+                <!-- 视频区 -->
+                <div class="video-wrap mb-3 rounded-3 overflow-hidden bg-black position-relative">
+                    @if (isHost)
+                    {
+                        <video id="local-video" autoplay muted playsinline
+                               class="w-100" style="max-height:360px;object-fit:cover;display:block;"></video>
+                        @if (!_cameraReady && _cameraError == null)
+                        {
+                            <div class="video-overlay">
+                                <div class="spinner-border text-light mb-2" role="status"></div>
+                                <p class="text-light small mb-0">正在启动摄像头...</p>
+                            </div>
+                        }
+                        @if (_cameraError != null)
+                        {
+                            <div class="video-overlay text-center px-3">
+                                <span style="font-size:2.5rem;">📵</span>
+                                <p class="text-light small mt-2 mb-2">@_cameraError</p>
+                                <button class="btn btn-sm btn-outline-light" @onclick="RetryCameraAsync">重试</button>
+                            </div>
+                        }
+                        @if (!_camOn && _cameraReady)
+                        {
+                            <div class="video-overlay">
+                                <span style="font-size:3rem;">🚫</span>
+                                <p class="text-light small mt-2 mb-0">摄像头已关闭</p>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <video id="remote-video" autoplay playsinline
+                               class="w-100" style="max-height:360px;object-fit:cover;display:block;"></video>
+                        @if (!_streamConnected)
+                        {
+                            <div class="video-overlay">
+                                <div class="spinner-border text-light mb-2" role="status"></div>
+                                <p class="text-light small mb-0">正在连接主播画面...</p>
+                            </div>
+                        }
+                    }
+                </div>
+
+                <!-- 菜谱步骤 -->
+                <div class="card shadow">
+                    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+                        <span class="fw-semibold">🍳 @room.RecipeName</span>
+                        <span class="badge bg-primary">步骤 @(room.CurrentStepIndex + 1) / @steps.Count</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="list-group list-group-flush" style="max-height:280px;overflow-y:auto;">
+                            @for (int i = 0; i < steps.Count; i++)
+                            {
+                                var idx = i;
+                                var isCur = idx == room.CurrentStepIndex;
+                                var isDone = idx < room.CurrentStepIndex;
+                                <div class="list-group-item d-flex align-items-start gap-3 py-2
+                                    @(isCur ? "list-group-item-primary" : "")
+                                    @(isDone ? "opacity-50" : "")">
+                                    <div class="step-dot @(isCur ? "bg-primary text-white" : isDone ? "bg-success text-white" : "bg-light")">
+                                        @(isDone ? "✓" : $"{idx + 1}")
+                                    </div>
+                                    <span class="@(isCur ? "fw-bold" : "") small flex-grow-1 py-1">@steps[idx].Instruction</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    @if (isHost && steps.Count > 0)
+                    {
+                        <div class="card-footer bg-white d-flex justify-content-between align-items-center py-2">
+                            <button class="btn btn-sm btn-outline-secondary"
+                                    disabled="@(room.CurrentStepIndex == 0)"
+                                    @onclick="() => UpdateStep(room.CurrentStepIndex - 1)">← 上一步</button>
+                            <small class="text-muted">@room.HostUserName 主播中</small>
+                            @if (room.CurrentStepIndex < steps.Count - 1)
+                            {
+                                <button class="btn btn-sm btn-primary"
+                                        @onclick="() => UpdateStep(room.CurrentStepIndex + 1)">下一步 →</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-success" @onclick="EndRoom">🎉 完成直播</button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- 右：弹幕 + 提问 -->
+            <div class="col-lg-5 d-flex flex-column gap-3" style="height: fit-content;">
+                <!-- 弹幕 -->
+                <div class="card shadow">
+                    <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0">💬 弹幕</h6>
+                        <small class="text-muted">@LiveService.Danmakus.Count(d => d.RoomId == room.Id) 条</small>
+                    </div>
+                    <div class="card-body p-2 danmaku-scroll" style="height:200px;overflow-y:auto;" @ref="_danmakuRef">
+                        @foreach (var d in LiveService.Danmakus.Where(d => d.RoomId == room.Id))
+                        {
+                            <div class="mb-1 d-flex align-items-baseline gap-1">
+                                <span class="badge bg-secondary" style="font-size:0.65rem;">@d.UserName</span>
+                                <span style="font-size:0.88rem;">@d.Content</span>
+                            </div>
+                        }
+                    </div>
+                    <div class="card-footer bg-white p-2">
+                        <div class="input-group input-group-sm">
+                            <input @bind="_danmakuInput" @bind:event="oninput" type="text"
+                                   class="form-control" placeholder="发弹幕..."
+                                   @onkeyup="HandleDanmakuKey" />
+                            <button class="btn btn-warning btn-sm" @onclick="SendDanmaku"
+                                    disabled="@string.IsNullOrWhiteSpace(_danmakuInput)">发送</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 提问 -->
+                <div class="card shadow">
+                    <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0">❓ 观众提问</h6>
+                        <small class="text-muted">@LiveService.Questions.Count 条</small>
+                    </div>
+                    <div class="card-body p-2" style="height:200px;overflow-y:auto;">
+                        @if (!LiveService.Questions.Any())
+                        {
+                            <p class="text-muted text-center small py-3">暂无提问</p>
+                        }
+                        @foreach (var q in LiveService.Questions.OrderByDescending(q => q.AskedAt))
+                        {
+                            <div class="border rounded p-2 mb-2 @(q.IsAnswered ? "border-success" : "")">
+                                <div class="d-flex justify-content-between">
+                                    <small class="fw-semibold text-muted">@q.AskUserName</small>
+                                    @if (!q.IsAnswered && isHost)
+                                    {
+                                        <button class="btn btn-outline-success py-0 px-1"
+                                                style="font-size:0.7rem;line-height:1.2;"
+                                                @onclick="() => ShowAnswerModal(q)">回答</button>
+                                    }
+                                </div>
+                                <p class="mb-1 small">@q.Content</p>
+                                @if (q.IsAnswered)
+                                {
+                                    <p class="mb-0 small text-success">✅ @q.Answer</p>
+                                }
+                            </div>
+                        }
+                    </div>
+                    @if (!isHost)
+                    {
+                        <div class="card-footer bg-white p-2">
+                            <div class="input-group input-group-sm">
+                                <input @bind="_questionInput" @bind:event="oninput" type="text"
+                                       class="form-control" placeholder="向主播提问..."
+                                       @onkeyup="HandleQuestionKey" />
+                                <button class="btn btn-outline-primary btn-sm" @onclick="AskQuestion"
+                                        disabled="@string.IsNullOrWhiteSpace(_questionInput)">提问</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- 创建直播弹窗 -->
+@if (_showCreateModal)
+{
+    <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">🔴 开始直播</h5>
+                    <button class="btn-close" @onclick="() => _showCreateModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">浏览器将请求摄像头和麦克风权限，请允许后才能开始直播。</p>
+                    <label class="form-label fw-semibold">选择要直播的菜谱</label>
+                    <select class="form-select" @bind="_selectedRecipeId">
+                        <option value="">-- 请选择菜谱 --</option>
+                        @foreach (var r in RecipeService.GetAllRecipes())
+                        {
+                            <option value="@r.Id">@r.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => _showCreateModal = false">取消</button>
+                    <button class="btn btn-danger" @onclick="CreateRoom"
+                            disabled="@string.IsNullOrEmpty(_selectedRecipeId)">
+                        🔴 开始直播
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- 回答弹窗 -->
+@if (_answeringQ != null)
+{
+    <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">✅ 回答问题</h5>
+                    <button class="btn-close" @onclick="() => _answeringQ = null"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">@_answeringQ.AskUserName 问：</p>
+                    <p class="fw-semibold">@_answeringQ.Content</p>
+                    <textarea @bind="_answerText" class="form-control" rows="3" placeholder="输入你的回答..."></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => _answeringQ = null">取消</button>
+                    <button class="btn btn-success" @onclick="SubmitAnswer"
+                            disabled="@string.IsNullOrWhiteSpace(_answerText)">发布回答</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .video-wrap { background: #111; min-height: 200px; }
+    .video-overlay {
+        position: absolute; inset: 0;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        background: rgba(0,0,0,0.6);
+    }
+    .step-dot {
+        width: 26px; height: 26px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.75rem; font-weight: bold; flex-shrink: 0;
+    }
+    .danmaku-scroll { scroll-behavior: smooth; }
+</style>
+
+@code {
+    // ── 状态 ──
+    private bool _showCreateModal;
+    private string _selectedRecipeId = string.Empty;
+    private string _danmakuInput = string.Empty;
+    private string _questionInput = string.Empty;
+    private LiveQuestion? _answeringQ;
+    private string _answerText = string.Empty;
+    private ElementReference _danmakuRef;
+
+    private bool _cameraReady;
+    private bool _camOn = true;
+    private bool _micOn = true;
+    private bool _streamConnected;
+    private bool _pendingCameraStart;   // 等 DOM 更新后再启摄像头
+    private string? _cameraError;
+
+    // ── WebRTC：用 DotNetObjectReference.Create(this) 接收 JS 回调 ──
+    private DotNetObjectReference<LiveRoom>? _dotNetRef;
+
+    [JSInvokable]
+    public async Task OnIce(string peerId, string candidate)
+    {
+        await LiveService.RelayIceAsync(peerId, candidate);
+    }
+
+    // ── 生命周期 ──
+    protected override async Task OnInitializedAsync()
+    {
+        _dotNetRef = DotNetObjectReference.Create(this);
+
+        LiveService.OnUpdate += OnServiceUpdate;
+        LiveService.ViewerWantsStream += OnViewerWantsStream;
+        LiveService.OfferReceived += OnOfferReceived;
+        LiveService.AnswerReceived += OnAnswerReceived;
+        LiveService.IceReceived += OnIceReceived;
+
+        if (AppState.IsLoggedIn && !LiveService.IsConnected)
+        {
+            try { await LiveService.ConnectAsync(AppState.UserName); StateHasChanged(); }
+            catch { }
+        }
+    }
+
+    private void OnServiceUpdate()
+    {
+        InvokeAsync(async () =>
+        {
+            StateHasChanged();
+            await ScrollDanmakuAsync();
+        });
+    }
+
+    // DOM 更新后触发：此时 video 元素已存在，可安全启动摄像头
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingCameraStart && LiveService.CurrentRoom != null)
+        {
+            _pendingCameraStart = false;
+            await StartCameraInternalAsync();
+        }
+    }
+
+    private async Task StartCameraInternalAsync()
+    {
+        _cameraReady = false;
+        _cameraError = null;
+        StateHasChanged();
+
+        var ok = await JS.InvokeAsync<bool>("liveroom.startCamera", "local-video");
+        if (ok)
+        {
+            _cameraReady = true;
+        }
+        else
+        {
+            _cameraError = "摄像头无法访问，请在浏览器/系统设置中允许摄像头权限后重试";
+        }
+        StateHasChanged();
+    }
+
+    private async Task RetryCameraAsync() => await StartCameraInternalAsync();
+
+    private async Task ScrollDanmakuAsync()
+    {
+        try { await JS.InvokeVoidAsync("scrollToBottom", _danmakuRef); } catch { }
+    }
+
+    // ── 直播间操作 ──
+    private void ShowCreateModal() => _showCreateModal = true;
+
+    private async Task CreateRoom()
+    {
+        if (string.IsNullOrEmpty(_selectedRecipeId)) return;
+        var recipeId = Guid.Parse(_selectedRecipeId);
+        var recipe = RecipeService.GetRecipeById(recipeId);
+        if (recipe == null) return;
+
+        _showCreateModal = false;
+        // 设置标志位，等 OnAfterRenderAsync 里 DOM 就绪后再启动摄像头
+        _pendingCameraStart = true;
+        _cameraReady = false;
+        await LiveService.CreateRoomAsync(recipe.Name, recipeId);
+        StateHasChanged();
+    }
+
+    private async Task JoinRoom(Guid roomId)
+    {
+        _streamConnected = false;
+        await LiveService.JoinRoomAsync(roomId);
+        await LiveService.RequestStreamAsync();
+    }
+
+    private async Task ReJoinRoom(Guid roomId)
+    {
+        await LiveService.JoinRoomAsync(roomId);
+        _pendingCameraStart = true;
+        StateHasChanged();
+    }
+
+    private async Task LeaveRoom()
+    {
+        try { await JS.InvokeVoidAsync("liveroom.stopAll"); } catch { }
+        await LiveService.LeaveRoomAsync();
+        _streamConnected = false;
+        StateHasChanged();
+    }
+
+    private async Task EndRoom()
+    {
+        try { await JS.InvokeVoidAsync("liveroom.stopAll"); } catch { }
+        await LiveService.EndRoomAsync();
+        _cameraReady = false;
+        _cameraError = null;
+        _pendingCameraStart = false;
+        StateHasChanged();
+    }
+
+    private async Task UpdateStep(int index)
+    {
+        LiveService.CurrentRoom!.CurrentStepIndex = index;
+        await LiveService.UpdateStepAsync(index);
+    }
+
+    // ── WebRTC 信令处理（全部在 Blazor 线程执行）──
+
+    private void OnViewerWantsStream(string viewerConnectionId)
+    {
+        InvokeAsync(async () =>
+        {
+            try
+            {
+                var offer = await JS.InvokeAsync<string>("liveroom.offer", viewerConnectionId, _dotNetRef);
+                await LiveService.SendOfferAsync(viewerConnectionId, offer);
+            }
+            catch { }
+        });
+    }
+
+    private void OnOfferReceived(string hostConnectionId, string sdp)
+    {
+        InvokeAsync(async () =>
+        {
+            try
+            {
+                var answer = await JS.InvokeAsync<string>("liveroom.answer", hostConnectionId, sdp, "remote-video", _dotNetRef);
+                await LiveService.SendAnswerAsync(hostConnectionId, answer);
+                _streamConnected = true;
+                StateHasChanged();
+            }
+            catch { }
+        });
+    }
+
+    private void OnAnswerReceived(string viewerConnectionId, string sdp)
+    {
+        InvokeAsync(async () =>
+        {
+            try { await JS.InvokeVoidAsync("liveroom.setAnswer", viewerConnectionId, sdp); }
+            catch { }
+        });
+    }
+
+    private void OnIceReceived(string fromId, string candidate)
+    {
+        InvokeAsync(async () =>
+        {
+            try { await JS.InvokeVoidAsync("liveroom.addIce", fromId, candidate); }
+            catch { }
+        });
+    }
+
+    // ── 摄像头控制 ──
+    private async Task ToggleMic()
+    {
+        _micOn = await JS.InvokeAsync<bool>("liveroom.toggleMute");
+    }
+
+    private async Task ToggleCam()
+    {
+        _camOn = await JS.InvokeAsync<bool>("liveroom.toggleCamera");
+    }
+
+    // ── 弹幕 + 提问 ──
+    private async Task SendDanmaku()
+    {
+        if (string.IsNullOrWhiteSpace(_danmakuInput)) return;
+        await LiveService.SendDanmakuAsync(_danmakuInput.Trim());
+        _danmakuInput = string.Empty;
+    }
+
+    private async Task HandleDanmakuKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SendDanmaku();
+    }
+
+    private async Task AskQuestion()
+    {
+        if (string.IsNullOrWhiteSpace(_questionInput)) return;
+        await LiveService.AskQuestionAsync(_questionInput.Trim());
+        _questionInput = string.Empty;
+    }
+
+    private async Task HandleQuestionKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await AskQuestion();
+    }
+
+    private void ShowAnswerModal(LiveQuestion q) { _answeringQ = q; _answerText = string.Empty; }
+
+    private async Task SubmitAnswer()
+    {
+        if (_answeringQ == null || string.IsNullOrWhiteSpace(_answerText)) return;
+        await LiveService.AnswerQuestionAsync(_answeringQ.Id, _answerText.Trim());
+        _answeringQ = null;
+        _answerText = string.Empty;
+    }
+
+    // ── 释放 ──
+    public async ValueTask DisposeAsync()
+    {
+        LiveService.OnUpdate -= OnServiceUpdate;
+        LiveService.ViewerWantsStream -= OnViewerWantsStream;
+        LiveService.OfferReceived -= OnOfferReceived;
+        LiveService.AnswerReceived -= OnAnswerReceived;
+        LiveService.IceReceived -= OnIceReceived;
+
+        _dotNetRef?.Dispose();
+
+        try { await JS.InvokeVoidAsync("liveroom.stopAll"); } catch { }
+        await LiveService.DisposeAsync();
+    }
+}

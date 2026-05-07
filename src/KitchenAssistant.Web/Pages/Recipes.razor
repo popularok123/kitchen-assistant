@@ -1,0 +1,129 @@
+@page "/recipes"
+@inject RecipeService RecipeService
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>📖 菜谱列表</h2>
+        <div class="d-flex gap-2">
+            <button class="btn @(_showFavoritesOnly ? "btn-warning" : "btn-outline-warning") btn-sm" @onclick="ToggleFavoritesFilter">
+                @(_showFavoritesOnly ? "⭐ 只看收藏" : "☆ 全部")
+            </button>
+            <input @bind="_searchTerm" @bind:event="oninput" type="text" class="form-control" style="width: 180px;" placeholder="搜索菜谱...">
+        </div>
+    </div>
+    <div class="d-flex gap-2 mb-4 flex-wrap">
+        <span class="text-muted small align-self-center me-1">难度：</span>
+        @foreach (var (label, level) in DifficultyFilters)
+        {
+            <button class="btn btn-sm @(_difficultyFilter == level ? "btn-primary" : "btn-outline-secondary")"
+                    @onclick="() => SetDifficultyFilter(level)">
+                @label
+            </button>
+        }
+    </div>
+
+    <div class="row g-4">
+        @foreach (var recipe in FilteredRecipes)
+        {
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow recipe-card">
+                    <div class="card-body" @onclick="() => GoToRecipe(recipe.Id)">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <h5 class="card-title">@recipe.Name</h5>
+                            <button class="btn btn-sm @(RecipeService.IsFavorite(recipe.Id) ? "btn-warning" : "btn-outline-secondary") favorite-btn" @onclick:stopPropagation="true" @onclick="() => RecipeService.ToggleFavorite(recipe.Id)">
+                                @(RecipeService.IsFavorite(recipe.Id) ? "⭐" : "☆")
+                            </button>
+                        </div>
+                        <p class="card-text text-muted small">@recipe.Description</p>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="badge bg-light text-dark">⏱️ @recipe.CookTimeMinutes 分钟</span>
+                            <span class="badge bg-primary">@GetDifficultyStars(recipe.DifficultyLevel)</span>
+                        </div>
+                    </div>
+                    <div class="card-footer bg-transparent border-top-0" @onclick="() => GoToRecipe(recipe.Id)">
+                        <small class="text-muted">@recipe.Ingredients.Count 种食材</small>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (!FilteredRecipes.Any())
+    {
+        <div class="text-center mt-5">
+            <div class="display-4 text-muted">🍽️</div>
+            <p class="mt-3 text-muted">@(_showFavoritesOnly ? "还没有收藏的菜谱" : "没有找到匹配的菜谱")</p>
+        </div>
+    }
+</div>
+
+<style>
+    .recipe-card {
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .recipe-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.12) !important;
+    }
+    .favorite-btn {
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+</style>
+
+@code {
+    private string _searchTerm = string.Empty;
+    private bool _showFavoritesOnly;
+    private int? _difficultyFilter;
+
+    private static readonly (string label, int? level)[] DifficultyFilters =
+    [
+        ("全部", null),
+        ("⭐ 简单", 1),
+        ("⭐⭐ 中等", 2),
+        ("⭐⭐⭐ 较难", 3),
+    ];
+
+    private List<Recipe> FilteredRecipes
+    {
+        get
+        {
+            var recipes = string.IsNullOrWhiteSpace(_searchTerm)
+                ? RecipeService.GetAllRecipes()
+                : RecipeService.SearchRecipes(_searchTerm);
+
+            if (_showFavoritesOnly)
+                recipes = recipes.Where(r => RecipeService.IsFavorite(r.Id)).ToList();
+
+            if (_difficultyFilter.HasValue)
+                recipes = recipes.Where(r => r.DifficultyLevel == _difficultyFilter.Value).ToList();
+
+            return recipes;
+        }
+    }
+
+    private void ToggleFavoritesFilter() => _showFavoritesOnly = !_showFavoritesOnly;
+
+    private void SetDifficultyFilter(int? level) => _difficultyFilter = level;
+
+    private void GoToRecipe(Guid recipeId) => Navigation.NavigateTo($"/recipe/{recipeId}");
+
+    private string GetDifficultyStars(int level) => new string('⭐', level);
+
+    protected override void OnInitialized()
+    {
+        RecipeService.OnFavoritesChanged += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        RecipeService.OnFavoritesChanged -= StateHasChanged;
+    }
+}

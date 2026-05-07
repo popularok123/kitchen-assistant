@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>厨房协作助手</title>
+    <base href="/" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#1b6ec2" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="厨房助手" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+    <link rel="stylesheet" href="css/bootstrap/bootstrap.min.css" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="icon" type="image/png" href="icons/icon-192.png" />
+    <link href="KitchenAssistant.Web.styles.css" rel="stylesheet" />
+</head>
+
+<body>
+    <div id="app">
+        <svg class="loading-progress">
+            <circle r="40%" cx="50%" cy="50%" />
+            <circle r="40%" cx="50%" cy="50%" />
+        </svg>
+        <div class="loading-progress-text"></div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="" class="reload">Reload</a>
+        <a class="dismiss">🗙</a>
+    </div>
+
+    <script src="_framework/blazor.webassembly.js"></script>
+    <script>
+        // ── 辅助函数 ────────────────────────────────────
+        window.scrollToBottom = (element) => {
+            if (element) element.scrollTop = element.scrollHeight;
+        };
+        let _wakeLock = null;
+        window.requestWakeLock = async () => {
+            try { _wakeLock = await navigator.wakeLock.request('screen'); return true; }
+            catch { return false; }
+        };
+        window.releaseWakeLock = async () => {
+            if (_wakeLock) { await _wakeLock.release(); _wakeLock = null; }
+        };
+
+        // ── WebRTC 直播间 ────────────────────────────────
+        window.liveroom = (() => {
+            let localStream = null;
+            const peers = {};
+            const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
+
+            function mk(peerId, videoId, dotNetRef) {
+                const pc = new RTCPeerConnection(ICE);
+                peers[peerId] = pc;
+                pc.onicecandidate = ({ candidate }) => {
+                    if (candidate) dotNetRef?.invokeMethodAsync('OnIce', peerId, JSON.stringify(candidate));
+                };
+                pc.ontrack = ({ streams }) => {
+                    if (!videoId) return;
+                    const v = document.getElementById(videoId);
+                    if (v && streams[0]) { v.srcObject = streams[0]; v.play().catch(() => {}); }
+                };
+                pc.onconnectionstatechange = () => {
+                    if (pc.connectionState === 'failed') { pc.close(); delete peers[peerId]; }
+                };
+                return pc;
+            }
+
+            return {
+                async startCamera(videoId) {
+                    try {
+                        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                        const v = document.getElementById(videoId);
+                        if (v) {
+                            v.srcObject = localStream;
+                            try { await v.play(); } catch {}
+                        }
+                        return true;
+                    } catch (e) {
+                        console.error('Camera error:', e.name, e.message);
+                        return false;
+                    }
+                },
+                stopAll() {
+                    localStream?.getTracks().forEach(t => t.stop());
+                    localStream = null;
+                    Object.values(peers).forEach(p => p.close());
+                    Object.keys(peers).forEach(k => delete peers[k]);
+                },
+                async offer(peerId, dotNetRef) {
+                    const pc = mk(peerId, null, dotNetRef);
+                    localStream?.getTracks().forEach(t => pc.addTrack(t, localStream));
+                    await pc.setLocalDescription(await pc.createOffer());
+                    return JSON.stringify(pc.localDescription);
+                },
+                async answer(peerId, sdp, videoId, dotNetRef) {
+                    const pc = mk(peerId, videoId, dotNetRef);
+                    await pc.setRemoteDescription(JSON.parse(sdp));
+                    await pc.setLocalDescription(await pc.createAnswer());
+                    return JSON.stringify(pc.localDescription);
+                },
+                async setAnswer(peerId, sdp) {
+                    const pc = peers[peerId];
+                    if (pc) await pc.setRemoteDescription(JSON.parse(sdp));
+                },
+                async addIce(peerId, candidate) {
+                    const pc = peers[peerId];
+                    if (pc && candidate) { try { await pc.addIceCandidate(JSON.parse(candidate)); } catch {} }
+                },
+                drop(peerId) { peers[peerId]?.close(); delete peers[peerId]; },
+                toggleMute() {
+                    const t = localStream?.getAudioTracks()[0];
+                    if (t) { t.enabled = !t.enabled; return t.enabled; }
+                    return true;
+                },
+                toggleCamera() {
+                    const t = localStream?.getVideoTracks()[0];
+                    if (t) { t.enabled = !t.enabled; return t.enabled; }
+                    return true;
+                }
+            };
+        })();
+
+        // ── PWA 安装提示 ────────────────────────────────
+        let _deferredInstall = null;
+        window.addEventListener('beforeinstallprompt', e => {
+            e.preventDefault();
+            _deferredInstall = e;
+            document.dispatchEvent(new CustomEvent('pwaInstallReady'));
+        });
+        window.showInstallPrompt = async () => {
+            if (!_deferredInstall) return false;
+            _deferredInstall.prompt();
+            const { outcome } = await _deferredInstall.userChoice;
+            _deferredInstall = null;
+            return outcome === 'accepted';
+        };
+        window.isPwaInstalled = () =>
+            window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+        // ── Service Worker 注册 ──────────────────────────
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/service-worker.js')
+                .catch(e => console.warn('SW:', e));
+        }
+    </script>
+</body>
+
+</html>

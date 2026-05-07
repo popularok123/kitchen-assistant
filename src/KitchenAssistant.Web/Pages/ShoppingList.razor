@@ -1,0 +1,187 @@
+@page "/shopping"
+@inject ShoppingListService ShoppingListService
+@inject RecipeService RecipeService
+@implements IDisposable
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>🛒 购物清单</h2>
+        <div class="d-flex gap-2">
+            @if (ShoppingListService.CompletedCount > 0)
+            {
+                <button class="btn btn-outline-secondary btn-sm" @onclick="ShoppingListService.ClearCompleted">
+                    清除已购
+                </button>
+            }
+            <button class="btn btn-outline-danger btn-sm" @onclick="ShowClearAllModal" disabled="@(ShoppingListService.TotalCount == 0)">
+                清空全部
+            </button>
+        </div>
+    </div>
+
+    @if (ShoppingListService.TotalCount > 0)
+    {
+        <div class="card shadow mb-4">
+            <div class="card-body py-2">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="progress flex-grow-1" style="height: 8px;">
+                        <div class="progress-bar bg-success" role="progressbar"
+                             style="width: @(ShoppingListService.TotalCount > 0 ? ShoppingListService.CompletedCount * 100 / ShoppingListService.TotalCount : 0)%;">
+                        </div>
+                    </div>
+                    <span class="text-muted small">
+                        已购 @ShoppingListService.CompletedCount / @ShoppingListService.TotalCount
+                    </span>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="card shadow mb-4">
+        <div class="card-body">
+            <div class="input-group">
+                <input @bind="_newItemName" type="text" class="form-control"
+                       placeholder="添加食材..." @onkeyup="HandleKeyUp">
+                <input @bind="_newItemQty" type="text" class="form-control" style="max-width: 100px;"
+                       placeholder="数量">
+                <button class="btn btn-primary" @onclick="AddItem" disabled="@string.IsNullOrWhiteSpace(_newItemName)">
+                    ➕ 添加
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow mb-4">
+        <div class="card-header bg-white">
+            <h6 class="mb-0">📖 从菜谱添加</h6>
+        </div>
+        <div class="card-body">
+            <div class="row g-2">
+                @foreach (var recipe in RecipeService.GetAllRecipes())
+                {
+                    <div class="col-md-6">
+                        <button class="btn btn-outline-primary w-100 text-start" @onclick="() => AddFromRecipe(recipe.Id)">
+                            <span class="me-2">🍳</span>
+                            @recipe.Name
+                            <span class="text-muted small">(@recipe.Ingredients.Count 种食材)</span>
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    @if (ShoppingListService.TotalCount == 0)
+    {
+        <div class="text-center py-5">
+            <div class="display-1 text-muted mb-3">🛒</div>
+            <p class="text-muted lead">购物清单还是空的</p>
+            <p class="text-muted small">选择菜谱一键添加，或手动输入食材</p>
+        </div>
+    }
+    else
+    {
+        @foreach (var group in ShoppingListService.GetItemsByCategory())
+        {
+            <div class="card shadow mb-3">
+                <div class="card-header bg-light">
+                    <h6 class="mb-0">@group.Key</h6>
+                </div>
+                <div class="list-group list-group-flush">
+                    @foreach (var item in group)
+                    {
+                        <div class="list-group-item list-group-item-action d-flex align-items-center @(item.IsPurchased ? "bg-success bg-opacity-10" : "")">
+                            <div class="form-check flex-grow-1">
+                                <input class="form-check-input" type="checkbox" id="item-@item.Id"
+                                       checked="@item.IsPurchased"
+                                       @onchange="() => ShoppingListService.ToggleItem(item.Id)">
+                                <label class="form-check-label @(item.IsPurchased ? "text-decoration-line-through text-muted" : "")" for="item-@item.Id">
+                                    @item.Name
+                                    @if (!string.IsNullOrWhiteSpace(item.Quantity))
+                                    {
+                                        <span class="text-muted small ms-2">(@item.Quantity)</span>
+                                    }
+                                </label>
+                            </div>
+                            <button class="btn btn-sm btn-outline-danger border-0" @onclick="() => ShoppingListService.RemoveItem(item.Id)">
+                                🗑️
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<!-- Confirmation Modal -->
+@if (_showClearAllModal)
+{
+    <div class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">确认清空</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showClearAllModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <p>确定要清空所有购物清单吗？此操作不可撤销。</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showClearAllModal = false">取消</button>
+                    <button type="button" class="btn btn-danger" @onclick="ConfirmClearAll">确认清空</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string _newItemName = string.Empty;
+    private string _newItemQty = string.Empty;
+    private bool _showClearAllModal;
+
+    protected override void OnInitialized()
+    {
+        ShoppingListService.OnChange += StateHasChanged;
+    }
+
+    private void AddItem()
+    {
+        if (!string.IsNullOrWhiteSpace(_newItemName))
+        {
+            ShoppingListService.AddItem(_newItemName, _newItemQty);
+            _newItemName = string.Empty;
+            _newItemQty = string.Empty;
+        }
+    }
+
+    private void HandleKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            AddItem();
+        }
+    }
+
+    private void AddFromRecipe(Guid recipeId)
+    {
+        ShoppingListService.GenerateFromRecipe(recipeId);
+    }
+
+    private void ShowClearAllModal()
+    {
+        _showClearAllModal = true;
+    }
+
+    private void ConfirmClearAll()
+    {
+        ShoppingListService.ClearAll();
+        _showClearAllModal = false;
+    }
+
+    public void Dispose()
+    {
+        ShoppingListService.OnChange -= StateHasChanged;
+    }
+}

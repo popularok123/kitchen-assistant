@@ -1,0 +1,107 @@
+@inject AppState AppState
+@inject NavigationManager Navigation
+
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">
+            <span class="me-2">🍳</span>厨房助手
+        </a>
+        <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+    </div>
+</div>
+
+<div class="@NavMenuCssClass nav-scrollable" @onclick="ToggleNavMenu">
+    <nav class="flex-column pt-3">
+        <div class="nav-item">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="me-2" style="font-size: 1.2rem;">🏠</span>
+                首页
+            </NavLink>
+        </div>
+        <div class="nav-item">
+            <NavLink class="nav-link" href="recipes">
+                <span class="me-2" style="font-size: 1.2rem;">📖</span>
+                菜谱列表
+            </NavLink>
+        </div>
+        <div class="nav-item">
+            <NavLink class="nav-link" href="recipes/manage">
+                <span class="me-2" style="font-size: 1.2rem;">📝</span>
+                菜谱管理
+            </NavLink>
+        </div>
+        <div class="nav-item">
+            <NavLink class="nav-link" href="chat">
+                <span class="me-2" style="font-size: 1.2rem;">💬</span>
+                聊天室
+            </NavLink>
+        </div>
+        <div class="nav-item">
+            <NavLink class="nav-link" href="collaborate">
+                <span class="me-2" style="font-size: 1.2rem;">👥</span>
+                协作烹饪
+            </NavLink>
+        </div>
+        <div class="nav-item">
+            <NavLink class="nav-link" href="live">
+                <span class="me-2" style="font-size: 1.2rem;">📡</span>
+                厨房直播间
+            </NavLink>
+        </div>
+        <div class="nav-item">
+            <NavLink class="nav-link" href="shopping">
+                <span class="me-2" style="font-size: 1.2rem;">🛒</span>
+                购物清单
+            </NavLink>
+        </div>
+    </nav>
+
+    @if (AppState.IsLoggedIn)
+    {
+        <div class="user-info px-4 py-4 border-top border-light mt-auto">
+            <div class="d-flex align-items-center mb-3">
+                <div class="avatar-bg me-3">
+                    <span style="font-size: 1.75rem;">@AppState.Avatar</span>
+                </div>
+                <div>
+                    <div class="text-light fw-semibold">@AppState.UserName</div>
+                    <div class="text-light opacity-75 small">已登录</div>
+                </div>
+            </div>
+            <button class="btn btn-sm btn-outline-light w-100 py-2" @onclick="Logout">
+                <span class="me-1">🚪</span> 退出登录
+            </button>
+        </div>
+    }
+</div>
+
+<style>
+    .avatar-bg {
+        width: 50px;
+        height: 50px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+</style>
+
+@code {
+    private bool collapseNavMenu = true;
+
+    private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
+
+    private void ToggleNavMenu()
+    {
+        collapseNavMenu = !collapseNavMenu;
+    }
+
+    private void Logout()
+    {
+        AppState.Logout();
+        Navigation.NavigateTo("/");
+    }
+}
