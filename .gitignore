@@ -37,3 +37,13 @@ logs/
 
 # Node (如后续添加前端)
 node_modules/
+
+# Go
+go-server/vendor/
+
+# Expo / React Native
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/android/
+mobile/ios/
